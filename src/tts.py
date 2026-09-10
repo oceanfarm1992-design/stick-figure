@@ -6,7 +6,7 @@ DEFAULT_VOICE = "en-US-GuyNeural"  # deep male narrator, matches the content pil
 
 
 async def _synthesize_async(text: str, out_path: str, voice: str):
-    communicate = edge_tts.Communicate(text, voice)
+    communicate = edge_tts.Communicate(text, voice, boundary="WordBoundary")
     word_timings = []
 
     with open(out_path, "wb") as audio_file:

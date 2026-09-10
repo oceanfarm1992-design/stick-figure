@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Image Generator</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #0f1115;
+    --panel: #171a21;
+    --border: #2a2e38;
+    --text: #e8e9ec;
+    --muted: #9aa0ab;
+    --accent: #6c8cff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, Segoe UI, Roboto, sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+  .card {
+    width: 100%;
+    max-width: 640px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 28px;
+  }
+  h1 {
+    margin: 0 0 4px;
+    font-size: 1.4rem;
+  }
+  p.sub {
+    margin: 0 0 20px;
+    color: var(--muted);
+    font-size: 0.9rem;
+  }
+  textarea {
+    width: 100%;
+    min-height: 80px;
+    resize: vertical;
+    background: #0f1115;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    font-size: 0.95rem;
+    font-family: inherit;
+  }
+  .row {
+    display: flex;
+    gap: 12px;
+    margin-top: 12px;
+    align-items: center;
+  }
+  button {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 18px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  .status {
+    color: var(--muted);
+    font-size: 0.85rem;
+  }
+  .result {
+    margin-top: 20px;
+  }
+  .result img {
+    width: 100%;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    display: block;
+  }
+  .error {
+    margin-top: 16px;
+    color: #ff6b6b;
+    font-size: 0.9rem;
+  }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>Local Image Generator</h1>
+    <p class="sub">Stable Diffusion 1.5, running on your GPU.</p>
+
+    <textarea id="prompt" placeholder="A cute robot mascot, 3d animated movie style, studio lighting"></textarea>
+
+    <div class="row">
+      <button id="generateBtn">Generate</button>
+      <span id="status" class="status"></span>
+    </div>
+
+    <div id="error" class="error" hidden></div>
+
+    <div id="result" class="result" hidden>
+      <img id="resultImg" alt="Generated image">
+    </div>
+  </div>
+
+<script>
+const btn = document.getElementById('generateBtn');
+const promptEl = document.getElementById('prompt');
+const statusEl = document.getElementById('status');
+const errorEl = document.getElementById('error');
+const resultEl = document.getElementById('result');
+const resultImg = document.getElementById('resultImg');
+
+async function generate() {
+  const prompt = promptEl.value.trim();
+  if (!prompt) {
+    promptEl.focus();
+    return;
+  }
+
+  btn.disabled = true;
+  errorEl.hidden = true;
+  statusEl.textContent = 'Generating… this can take a bit on first run.';
+
+  try {
+    const res = await fetch('/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt })
+    });
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.error || 'Generation failed.');
+    }
+
+    resultImg.src = data.image_url + '?t=' + Date.now();
+    resultEl.hidden = false;
+    statusEl.textContent = 'Done.';
+  } catch (err) {
+    errorEl.textContent = err.message;
+    errorEl.hidden = false;
+    statusEl.textContent = '';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+btn.addEventListener('click', generate);
+promptEl.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) generate();
+});
+</script>
+</body>
+</html>

@@ -7,6 +7,8 @@ from moviepy import AudioFileClip, ImageSequenceClip
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 
+import audio_mix
+import camera
 import captions
 import database
 import stick_figure
@@ -35,13 +37,17 @@ def generate_one(row: dict, out_dir: str, voice: str) -> str:
             animation_cue=row["animation_cue"],
         )
 
+        frames = camera.apply_climax_zoom(frames)
+
         print(f"[{video_id}] burning captions...")
         frames = captions.burn_captions(frames, word_timings, FPS)
+
+        final_audio = audio_mix.mix_with_narration(audio_clip, row["pillar"])
 
         os.makedirs(out_dir, exist_ok=True)
         out_path = os.path.join(out_dir, f"{video_id}.mp4")
 
-        video_clip = ImageSequenceClip(frames, fps=FPS).with_audio(audio_clip)
+        video_clip = ImageSequenceClip(frames, fps=FPS).with_audio(final_audio)
         video_clip.write_videofile(out_path, codec="libx264", audio_codec="aac", fps=FPS, logger=None)
 
         audio_clip.close()

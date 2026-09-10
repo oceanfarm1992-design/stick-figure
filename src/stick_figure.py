@@ -4,47 +4,8 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 WIDTH, HEIGHT = 1080, 1920
-
-_THEMES = {
-    "male": {"top": (18, 20, 28), "bottom": (40, 28, 20), "accent": (255, 196, 120), "figure": (225, 225, 230)},
-    "relationship": {"top": (30, 15, 25), "bottom": (58, 22, 36), "accent": (255, 170, 190), "figure": (230, 210, 220)},
-    "growth": {"top": (15, 22, 25), "bottom": (42, 34, 14), "accent": (255, 210, 90), "figure": (235, 225, 200)},
-    "resilience": {"top": (18, 24, 32), "bottom": (30, 42, 56), "accent": (255, 225, 140), "figure": (220, 225, 230)},
-}
-
-_COLOR_KEYWORDS = [
-    ("gold", (222, 180, 80)),
-    ("amber", (222, 180, 80)),
-    ("blonde", (230, 210, 140)),
-    ("dark grey", (90, 90, 100)),
-    ("dark gray", (90, 90, 100)),
-    ("charcoal", (80, 80, 88)),
-    ("blue", (110, 150, 210)),
-    ("red", (200, 90, 90)),
-    ("white", (235, 235, 235)),
-    ("black", (45, 45, 50)),
-]
-
-
-def _pick_theme(pillar: str) -> dict:
-    text = (pillar or "").lower()
-    if "male" in text:
-        return _THEMES["male"]
-    if "relationship" in text:
-        return _THEMES["relationship"]
-    if "growth" in text or "accountability" in text:
-        return _THEMES["growth"]
-    if "resilien" in text or "struggle" in text or "life" in text:
-        return _THEMES["resilience"]
-    return _THEMES["male"]
-
-
-def _pick_color(character_visual: str, fallback: tuple) -> tuple:
-    text = (character_visual or "").lower()
-    for keyword, rgb in _COLOR_KEYWORDS:
-        if keyword in text:
-            return rgb
-    return fallback
+INK = (25, 25, 25)
+PAPER = (255, 255, 255)
 
 
 def _pick_style(animation_cue: str, character_visual: str) -> str:
@@ -57,195 +18,228 @@ def _pick_style(animation_cue: str, character_visual: str) -> str:
         return "climb"
     if any(k in text for k in ("rain", "umbrella", "shield", "mirror")):
         return "shield"
-    return "idle"
+    return "walk"
 
 
-def _lerp_color(c1, c2, t):
-    return tuple(int(c1[i] + (c2[i] - c1[i]) * t) for i in range(3))
+def _pick_emotion(pillar: str) -> str:
+    text = (pillar or "").lower()
+    if "growth" in text or "accountability" in text:
+        return "determined"
+    if "resilien" in text or "struggle" in text or "life" in text:
+        return "neutral"
+    return "worried"  # male perspective / relationship pillars default to this
 
 
-def _background(theme: dict) -> Image.Image:
-    img = Image.new("RGB", (WIDTH, HEIGHT))
-    px = img.load()
-    top, bottom = theme["top"], theme["bottom"]
-    for y in range(HEIGHT):
-        color = _lerp_color(top, bottom, y / HEIGHT)
-        for x in range(0, WIDTH, 4):  # coarse fill, upscaled below, keeps render fast
-            px[x, y] = color
-    return img.resize((WIDTH, HEIGHT), Image.NEAREST)
+def _point(origin, angle, length):
+    return (origin[0] + math.sin(angle) * length, origin[1] + math.cos(angle) * length)
 
 
-def _draw_glow(base: Image.Image, center, radius, color):
-    overlay = Image.new("RGBA", base.size, (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
-    for i, r in enumerate(range(radius, 0, -max(1, radius // 6))):
-        alpha = int(70 * (1 - i / 6))
-        draw.ellipse(
-            [center[0] - r, center[1] - r, center[0] + r, center[1] + r],
-            fill=(color[0], color[1], color[2], max(alpha, 0)),
-        )
-    return Image.alpha_composite(base.convert("RGBA"), overlay).convert("RGB")
+def _draw_limb(draw, origin, angle, bend, upper, lower, width):
+    joint = _point(origin, angle, upper)
+    end = _point(joint, angle + bend, lower)
+    draw.line([origin, joint], fill=INK, width=width)
+    draw.line([joint, end], fill=INK, width=width)
+    return end
 
 
-def _draw_figure(draw: ImageDraw.ImageDraw, cx, cy, scale, color, pose):
-    width = max(4, int(scale * 0.035))
+def _draw_face(draw, head_c, head_r, emotion):
+    eye_dx = head_r * 0.35
+    eye_y = head_c[1] - head_r * 0.05
+    eye_r = max(2, head_r * 0.07)
+
+    for side in (-1, 1):
+        ex = head_c[0] + side * eye_dx
+        draw.ellipse([ex - eye_r, eye_y - eye_r, ex + eye_r, eye_y + eye_r], fill=INK)
+
+        brow_y = eye_y - head_r * 0.32
+        if emotion == "worried":
+            inner = (ex - side * head_r * 0.18, brow_y - head_r * 0.1)
+            outer = (ex + side * head_r * 0.22, brow_y + head_r * 0.12)
+        elif emotion == "determined":
+            inner = (ex - side * head_r * 0.18, brow_y - head_r * 0.05)
+            outer = (ex + side * head_r * 0.22, brow_y + head_r * 0.1)
+        else:
+            inner = (ex - side * head_r * 0.2, brow_y)
+            outer = (ex + side * head_r * 0.2, brow_y)
+        draw.line([inner, outer], fill=INK, width=max(2, int(head_r * 0.06)))
+
+    mouth_y = head_c[1] + head_r * 0.42
+    mw = head_r * 0.32
+    if emotion == "worried":
+        pts = [(head_c[0] - mw, mouth_y - head_r * 0.08), (head_c[0], mouth_y + head_r * 0.1), (head_c[0] + mw, mouth_y - head_r * 0.08)]
+    elif emotion == "determined":
+        pts = [(head_c[0] - mw, mouth_y), (head_c[0] + mw, mouth_y)]
+    else:
+        pts = [(head_c[0] - mw, mouth_y), (head_c[0], mouth_y + head_r * 0.04), (head_c[0] + mw, mouth_y)]
+    draw.line(pts, fill=INK, width=max(2, int(head_r * 0.05)))
+
+
+def _draw_figure(draw, cx, cy, scale, pose, emotion):
+    width = max(5, int(scale * 0.022))
     hip = (cx, cy - scale * 0.45)
-    lean_x = math.sin(pose["lean"]) * scale * 0.18
+    lean_x = math.sin(pose["lean"]) * scale * 0.15
     neck = (hip[0] + lean_x, hip[1] - scale * 0.32)
-    head_c = (neck[0] + lean_x * 0.4, neck[1] - scale * 0.12 + pose["head_bob"])
+    head_c = (neck[0] + lean_x * 0.4, neck[1] - scale * 0.13 + pose["head_bob"])
     head_r = scale * 0.09
 
-    draw.line([hip, neck], fill=color, width=width)
+    draw.line([hip, neck], fill=INK, width=width)
 
-    shoulder = neck
-    for side, angle in (("l", pose["arm_l"]), ("r", pose["arm_r"])):
-        ex = shoulder[0] + math.sin(angle) * scale * 0.32
-        ey = shoulder[1] + math.cos(angle) * scale * 0.32
-        draw.line([shoulder, (ex, ey)], fill=color, width=width)
-
-    for side, angle in (("l", pose["leg_l"]), ("r", pose["leg_r"])):
-        fx = hip[0] + math.sin(angle) * scale * 0.42
-        fy = hip[1] + math.cos(angle) * scale * 0.42
-        draw.line([hip, (fx, fy)], fill=color, width=width)
+    _draw_limb(draw, neck, pose["arm_l"], pose["arm_l_bend"], scale * 0.19, scale * 0.17, width)
+    _draw_limb(draw, neck, pose["arm_r"], pose["arm_r_bend"], scale * 0.19, scale * 0.17, width)
+    foot_l = _draw_limb(draw, hip, pose["leg_l"], pose["leg_l_bend"], scale * 0.23, scale * 0.22, width)
+    foot_r = _draw_limb(draw, hip, pose["leg_r"], pose["leg_r_bend"], scale * 0.23, scale * 0.22, width)
 
     draw.ellipse(
         [head_c[0] - head_r, head_c[1] - head_r, head_c[0] + head_r, head_c[1] + head_r],
-        outline=color,
+        outline=INK,
         width=width,
     )
-    return head_c, neck
+    _draw_face(draw, head_c, head_r, emotion)
+
+    return {"head": head_c, "head_r": head_r, "neck": neck, "hip": hip, "feet": (foot_l, foot_r)}
 
 
-def _pose_idle(t):
-    bob = math.sin(2 * math.pi * t * 3) * 6
-    lean = math.sin(2 * math.pi * t * 1.5) * 0.06
-    sway = math.sin(2 * math.pi * t * 1.5)
+def _pose_walk(t):
+    stride = math.sin(2 * math.pi * t * 1.6)
     return {
-        "head_bob": bob,
-        "lean": lean,
-        "arm_l": -0.35 + 0.1 * sway,
-        "arm_r": 0.35 - 0.1 * sway,
-        "leg_l": -0.12,
-        "leg_r": 0.12,
+        "head_bob": abs(stride) * 4,
+        "lean": 0.05,
+        "arm_l": -0.5 * stride, "arm_l_bend": 0.3,
+        "arm_r": 0.5 * stride, "arm_r_bend": 0.3,
+        "leg_l": 0.5 * stride, "leg_l_bend": -0.4 * max(0, -stride),
+        "leg_r": -0.5 * stride, "leg_r_bend": -0.4 * max(0, stride),
     }
 
 
 def _pose_carry(t):
-    step = math.sin(2 * math.pi * t * 2)
+    stride = math.sin(2 * math.pi * t * 1.1)
     return {
-        "head_bob": abs(math.sin(2 * math.pi * t * 2)) * 5,
-        "lean": 0.28,
-        "arm_l": 1.1 + 0.15 * step,
-        "arm_r": -1.1 - 0.15 * step,
-        "leg_l": 0.3 * step,
-        "leg_r": -0.3 * step,
+        "head_bob": abs(stride) * 3,
+        "lean": 0.32,
+        "arm_l": 0.55, "arm_l_bend": 0.35,
+        "arm_r": -0.2, "arm_r_bend": -0.15,
+        "leg_l": 0.3 * stride, "leg_l_bend": -0.3 * max(0, -stride),
+        "leg_r": -0.3 * stride, "leg_r_bend": -0.3 * max(0, stride),
     }
 
 
 def _pose_climb(t):
-    step = math.sin(2 * math.pi * t * 3)
+    stride = math.sin(2 * math.pi * t * 2.2)
     return {
         "head_bob": 0,
-        "lean": 0.12,
-        "arm_l": -0.6 - 0.3 * step,
-        "arm_r": 0.6 + 0.3 * step,
-        "leg_l": 0.5 * step,
-        "leg_r": -0.5 * step,
+        "lean": 0.15,
+        "arm_l": -0.8 - 0.3 * stride, "arm_l_bend": 0.5,
+        "arm_r": 0.8 + 0.3 * stride, "arm_r_bend": -0.5,
+        "leg_l": 0.7 * stride, "leg_l_bend": -0.6,
+        "leg_r": -0.7 * stride, "leg_r_bend": -0.6,
     }
 
 
 def _pose_shield(t):
-    sway = math.sin(2 * math.pi * t * 1.2)
+    sway = math.sin(2 * math.pi * t * 1.0)
     return {
-        "head_bob": sway * 4,
+        "head_bob": sway * 3,
         "lean": 0.02 * sway,
-        "arm_l": -2.2,
-        "arm_r": 2.2,
-        "leg_l": -0.1,
-        "leg_r": 0.1,
+        "arm_l": -2.3, "arm_l_bend": 0.6,
+        "arm_r": 2.3, "arm_r_bend": -0.6,
+        "leg_l": -0.08, "leg_l_bend": 0,
+        "leg_r": 0.08, "leg_r_bend": 0,
     }
 
 
-_POSE_FUNCS = {"idle": _pose_idle, "carry": _pose_carry, "climb": _pose_climb, "shield": _pose_shield}
+def _pose_idle(t):
+    sway = math.sin(2 * math.pi * t * 1.3)
+    return {
+        "head_bob": sway * 3,
+        "lean": 0.03 * sway,
+        "arm_l": -0.2, "arm_l_bend": 0.15,
+        "arm_r": 0.2, "arm_r_bend": -0.15,
+        "leg_l": -0.06, "leg_l_bend": 0,
+        "leg_r": 0.06, "leg_r_bend": 0,
+    }
+
+
+_POSE_FUNCS = {"walk": _pose_walk, "carry": _pose_carry, "climb": _pose_climb, "shield": _pose_shield}
+
+
+def _draw_road(draw, base_y):
+    points = []
+    for x in range(-50, WIDTH + 60, 20):
+        y = base_y + math.sin(x / WIDTH * 3.4 + 0.6) * HEIGHT * 0.05
+        points.append((x, y))
+    draw.line(points, fill=INK, width=6, joint="curve")
+
+
+def _draw_steps(draw):
+    for i in range(6):
+        y = HEIGHT * (0.95 - i * 0.09)
+        x0 = WIDTH * (0.15 + i * 0.06)
+        draw.line([(x0, y), (x0 + WIDTH * 0.5, y)], fill=INK, width=6)
+
+
+def _draw_heart(draw, center, size):
+    x, y = center
+    r = size * 0.55
+    draw.ellipse([x - r * 1.5, y - r, x - r * 0.1, y + r * 0.7], outline=INK, width=4)
+    draw.ellipse([x + r * 0.1, y - r, x + r * 1.5, y + r * 0.7], outline=INK, width=4)
+    draw.polygon([(x - r * 1.5, y + r * 0.25), (x + r * 1.5, y + r * 0.25), (x, y + r * 1.9)], outline=INK, width=4)
+
+
+def _draw_burden(draw, parts, scale):
+    neck = parts["neck"]
+    r = scale * 0.13
+    boulder_c = (neck[0] + scale * 0.34, neck[1] - scale * 0.02)
+    draw.ellipse([boulder_c[0] - r, boulder_c[1] - r, boulder_c[0] + r, boulder_c[1] + r], outline=INK, width=5)
+    draw.line([neck, (boulder_c[0] - r * 0.6, boulder_c[1] + r * 0.6)], fill=INK, width=4)
 
 
 def render_frames(duration_sec: float, fps: int, pillar: str, character_visual: str, animation_cue: str) -> list:
-    theme = _pick_theme(pillar)
-    color = _pick_color(character_visual, theme["figure"])
     style = _pick_style(animation_cue, character_visual)
-
-    total_frames = max(1, int(round(duration_sec * fps)))
-    frames = []
+    emotion = _pick_emotion(pillar)
     has_heart = "heart" in f"{character_visual} {animation_cue}".lower()
 
-    bg = _background(theme)
+    total_frames = max(1, int(round(duration_sec * fps)))
+    cx, cy = WIDTH / 2, HEIGHT * 0.62
+    scale = HEIGHT * 0.32
 
+    base = Image.new("RGB", (WIDTH, HEIGHT), PAPER)
+    base_draw = ImageDraw.Draw(base)
+    if style == "climb":
+        _draw_steps(base_draw)
+    elif style == "couch":
+        base_draw.line([(WIDTH * 0.1, HEIGHT * 0.68), (WIDTH * 0.9, HEIGHT * 0.68)], fill=INK, width=8)
+    else:
+        _draw_road(base_draw, cy + scale * 0.42)
+
+    frames = []
     for i in range(total_frames):
         t = i / total_frames
-        frame = bg.copy()
+        frame = base.copy()
+        draw = ImageDraw.Draw(frame)
 
         if style == "couch":
-            frame = _render_couch_scene(frame, theme, color, t)
+            gap = 0.05 * math.sin(2 * math.pi * t * 0.8)
+            for fx in (WIDTH * (0.28 - gap), WIDTH * (0.72 + gap)):
+                _draw_figure(draw, fx, HEIGHT * 0.68, HEIGHT * 0.22, _pose_idle(t), emotion)
         else:
-            cx, cy = WIDTH / 2, HEIGHT * 0.62
-            scale = HEIGHT * 0.32
-
+            fx, fy = cx, cy
             if style == "climb":
-                cx = WIDTH * (0.3 + 0.4 * t)
-                cy = HEIGHT * (0.72 - 0.28 * t)
-                _draw_steps(frame, theme["accent"])
-
-            pose = _POSE_FUNCS[style](t)
-            draw = ImageDraw.Draw(frame)
+                fx = WIDTH * (0.3 + 0.4 * t)
+                fy = HEIGHT * (0.72 - 0.28 * t)
 
             if style == "shield":
-                arc_box = [cx - scale * 0.55, cy - scale * 1.15, cx + scale * 0.55, cy - scale * 0.55]
-                draw.arc(arc_box, start=200, end=340, fill=theme["accent"], width=max(4, int(scale * 0.03)))
+                arc_box = [fx - scale * 0.55, fy - scale * 1.15, fx + scale * 0.55, fy - scale * 0.55]
+                draw.arc(arc_box, start=200, end=340, fill=INK, width=6)
 
-            head_c, neck = _draw_figure(draw, cx, cy, scale, color, pose)
-
-            if has_heart:
-                heart_center = (neck[0], neck[1] + scale * 0.08)
-                glow_r = int(scale * 0.09 + math.sin(2 * math.pi * t * 2) * scale * 0.015)
-                frame = _draw_glow(frame, heart_center, glow_r, theme["accent"])
+            pose = _POSE_FUNCS[style](t)
+            parts = _draw_figure(draw, fx, fy, scale, pose, emotion)
 
             if style == "carry":
-                _draw_burden(frame, cx, cy, scale)
+                _draw_burden(draw, parts, scale)
+            if has_heart:
+                pulse = scale * 0.09 + math.sin(2 * math.pi * t * 2) * scale * 0.01
+                _draw_heart(draw, (parts["neck"][0], parts["neck"][1] + scale * 0.1), pulse)
 
         frames.append(np.array(frame))
 
     return frames
-
-
-def _draw_steps(frame: Image.Image, color):
-    draw = ImageDraw.Draw(frame)
-    for i in range(6):
-        y = HEIGHT * (0.95 - i * 0.09)
-        x0 = WIDTH * (0.15 + i * 0.06)
-        draw.line([(x0, y), (x0 + WIDTH * 0.5, y)], fill=color, width=6)
-
-
-def _draw_burden(frame: Image.Image, cx, cy, scale):
-    draw = ImageDraw.Draw(frame)
-    top = cy - scale * 0.95
-    box = [cx - scale * 0.22, top - scale * 0.16, cx + scale * 0.22, top + scale * 0.1]
-    draw.rounded_rectangle(box, radius=int(scale * 0.05), outline=(140, 140, 150), width=6)
-
-
-def _render_couch_scene(frame: Image.Image, theme, color, t):
-    draw = ImageDraw.Draw(frame)
-    couch_y = HEIGHT * 0.68
-    draw.line([(WIDTH * 0.1, couch_y), (WIDTH * 0.9, couch_y)], fill=(90, 70, 60), width=14)
-
-    gap = 0.05 * math.sin(2 * math.pi * t * 0.8)
-    left_x = WIDTH * (0.28 - gap)
-    right_x = WIDTH * (0.72 + gap)
-    scale = HEIGHT * 0.22
-
-    for cx in (left_x, right_x):
-        pose = _pose_idle(t)
-        pose["leg_l"] = -0.05
-        pose["leg_r"] = 0.05
-        _draw_figure(draw, cx, couch_y, scale, color, pose)
-
-    return frame
